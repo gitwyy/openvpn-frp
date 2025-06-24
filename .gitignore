@@ -1,0 +1,108 @@
+# OpenVPN-FRP Project .gitignore
+
+# 敏感文件和私钥
+*.key
+*.p12
+*.crt
+*.csr
+*.pem
+pki/ca/private/
+pki/server/private/
+pki/clients/private/
+*.ovpn
+
+# 环境配置文件
+.env
+.env.local
+.env.production
+.env.*.local
+
+# 日志文件
+*.log
+logs/
+*.log.*
+
+# Docker相关
+.docker/
+docker-compose.override.yml
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+.#*
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE和编辑器
+.vscode/settings.json
+.idea/
+*.sublime-*
+.atom/
+
+# Node.js (如果有)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 构建产物
+dist/
+build/
+
+# 生成的客户端配置文件
+client*.ovpn
+test*.ovpn
+pro-*.ovpn
+*-client*.ovpn
+
+# 配置备份文件
+*.ini.backup
+*.conf.backup
+*.yml.backup
+
+# 健康检查和监控文件
+health-*.json
+health-*.html
+monitoring-*.log
+
+# 文档备份和临时文档
+*-UPDATE.md
+*-OPTIMIZATION.md
+SUMMARY-*.md
+HEALTH-CHECK-*.md
+
+# 额外的敏感信息保护
+# 防止包含敏感信息的配置文件被提交
+*.ini.orig
+*.conf.orig
+*.yml.orig
+*.yaml.orig
+
+# 防止包含真实密码/token的文件
+*password*
+*secret*
+*token*
+*auth*
+
+# 防止测试配置文件
+test.env
+dev.env
+local.env
+staging.env
+
+# 防止包含IP地址的配置文件
+*-production.*
+*-prod.*
+*-live.*

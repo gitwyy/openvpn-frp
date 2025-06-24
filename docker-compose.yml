@@ -1,0 +1,216 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # OpenVPN 服务
+  # =============================================================================
+  openvpn:
+    build:
+      context: .
+      dockerfile: docker/openvpn/Dockerfile
+    image: openvpn-frp/openvpn:latest
+    container_name: openvpn
+    restart: unless-stopped
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    ports:
+      - "${OPENVPN_PORT:-1194}:1194/${OPENVPN_PROTOCOL:-udp}"
+      - "${MANAGEMENT_PORT:-7505}:7505"
+    volumes:
+      - ./config/server.conf:/etc/openvpn/server.conf:ro
+      - ./pki:/etc/openvpn/pki:ro
+      - openvpn-logs:/var/log/openvpn
+      - openvpn-ccd:/etc/openvpn/ccd
+      - openvpn-status:/etc/openvpn/status
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - OPENVPN_CONFIG=/etc/openvpn/server.conf
+      - LOG_LEVEL=${LOG_LEVEL:-3}
+      - ENABLE_MANAGEMENT=${ENABLE_MANAGEMENT:-true}
+      - MANAGEMENT_PORT=${MANAGEMENT_PORT:-7505}
+    networks:
+      - openvpn-network
+    healthcheck:
+      test: ["CMD", "pgrep", "openvpn"]
+      interval: ${HEALTH_CHECK_INTERVAL:-30}s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "openvpn-frp.service=openvpn"
+      - "openvpn-frp.version=1.0"
+
+  # =============================================================================
+  # FRP 客户端服务 (仅在需要时启动)
+  # =============================================================================
+  frpc:
+    build:
+      context: .
+      dockerfile: docker/frp/frpc/Dockerfile
+    image: openvpn-frp/frpc:latest
+    container_name: frpc
+    restart: unless-stopped
+    volumes:
+      - ./config/frpc.ini:/opt/frp/conf/frpc.ini:ro
+      - frpc-logs:/opt/frp/logs
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - FRP_SERVER_ADDR=${FRP_SERVER_ADDR}
+      - FRP_SERVER_PORT=${FRP_SERVER_PORT:-7000}
+      - FRP_TOKEN=${FRP_TOKEN}
+      - OPENVPN_HOST=openvpn
+      - OPENVPN_PORT=${OPENVPN_PORT:-1194}
+    networks:
+      - frp-network
+      - openvpn-network
+    depends_on:
+      openvpn:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "frpc"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "openvpn-frp.service=frpc"
+      - "openvpn-frp.version=1.0"
+    profiles:
+      - frp-client
+      - frp-full
+
+  # =============================================================================
+  # FRP 服务端 (仅在完整FRP架构时启动)
+  # =============================================================================
+  frps:
+    build:
+      context: .
+      dockerfile: docker/frp/frps/Dockerfile
+    image: openvpn-frp/frps:latest
+    container_name: frps
+    restart: unless-stopped
+    ports:
+      - "${FRP_SERVER_PORT:-7000}:7000"
+      - "${FRP_DASHBOARD_PORT:-7500}:7500"
+      - "${OPENVPN_PORT:-1194}:1194/${OPENVPN_PROTOCOL:-udp}"
+      - "${MANAGEMENT_PORT:-7505}:7505"
+      - "8080:8080"
+    volumes:
+      - ./config/frps.ini:/opt/frp/conf/frps.ini:ro
+      - frps-logs:/opt/frp/logs
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - FRP_TOKEN=${FRP_TOKEN}
+      - FRP_DASHBOARD_USER=${FRP_DASHBOARD_USER:-admin}
+      - FRP_DASHBOARD_PWD=${FRP_DASHBOARD_PWD}
+    networks:
+      - frp-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "openvpn-frp.service=frps"
+      - "openvpn-frp.version=1.0"
+    profiles:
+      - frp-full
+
+  # =============================================================================
+  # 监控和管理服务 (可选)
+  # =============================================================================
+  monitor:
+    image: alpine:latest
+    container_name: openvpn-monitor
+    restart: unless-stopped
+    volumes:
+      - ./scripts:/scripts:ro
+      - openvpn-logs:/var/log/openvpn:ro
+      - frpc-logs:/var/log/frpc:ro
+      - frps-logs:/var/log/frps:ro
+      - monitor-data:/data
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - MONITOR_INTERVAL=${HEALTH_CHECK_INTERVAL:-30}
+    command: >
+      sh -c "
+        apk add --no-cache curl jq netcat-openbsd &&
+        while true; do
+          /scripts/health-check.sh > /data/health-status.json 2>&1;
+          sleep ${HEALTH_CHECK_INTERVAL:-30};
+        done
+      "
+    networks:
+      - openvpn-network
+      - frp-network
+    depends_on:
+      - openvpn
+    labels:
+      - "openvpn-frp.service=monitor"
+      - "openvpn-frp.version=1.0"
+    profiles:
+      - monitoring
+
+# =============================================================================
+# 网络配置
+# =============================================================================
+networks:
+  openvpn-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: ${OPENVPN_DOCKER_SUBNET:-172.21.0.0/16}
+    labels:
+      - "openvpn-frp.network=openvpn"
+
+  frp-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: ${DOCKER_NETWORK_SUBNET:-172.20.0.0/16}
+    labels:
+      - "openvpn-frp.network=frp"
+
+# =============================================================================
+# 数据卷配置
+# =============================================================================
+volumes:
+  # OpenVPN 相关卷
+  openvpn-logs:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=openvpn-logs"
+  
+  openvpn-ccd:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=openvpn-ccd"
+  
+  openvpn-status:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=openvpn-status"
+
+  # FRP 相关卷
+  frps-logs:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=frps-logs"
+  
+  frpc-logs:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=frpc-logs"
+
+  # 监控相关卷
+  monitor-data:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=monitor-data"

@@ -1,0 +1,81 @@
+# OpenSSL 配置文件用于 OpenVPN PKI 证书生成
+# 适用于 CA、服务器和客户端证书
+
+[ req ]
+default_bits = 2048
+default_keyfile = privkey.pem
+distinguished_name = req_distinguished_name
+attributes = req_attributes
+x509_extensions = v3_ca
+
+[ req_distinguished_name ]
+countryName = Country Name (2 letter code)
+countryName_default = CN
+countryName_min = 2
+countryName_max = 2
+
+stateOrProvinceName = State or Province Name (full name)
+stateOrProvinceName_default = Beijing
+
+localityName = Locality Name (eg, city)
+localityName_default = Beijing
+
+organizationName = Organization Name (eg, company)
+organizationName_default = OpenVPN CA
+
+organizationalUnitName = Organizational Unit Name (eg, section)
+organizationalUnitName_default = IT Department
+
+commonName = Common Name (e.g. server FQDN or YOUR name)
+commonName_max = 64
+
+emailAddress = Email Address
+emailAddress_max = 64
+emailAddress_default = admin@openvpn.local
+
+[ req_attributes ]
+
+[ v3_ca ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical,CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+
+[ v3_server ]
+basicConstraints = CA:FALSE
+nsCertType = server
+nsComment = "OpenVPN Server Certificate"
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage = serverAuth
+keyUsage = critical, digitalSignature, keyEncipherment
+
+[ v3_client ]
+basicConstraints = CA:FALSE
+nsCertType = client
+nsComment = "OpenVPN Client Certificate"
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage = clientAuth
+keyUsage = critical, digitalSignature
+
+[ crl_ext ]
+authorityKeyIdentifier = keyid:always
+
+[ server_cert ]
+basicConstraints = CA:FALSE
+nsCertType = server
+nsComment = "OpenVPN Server Certificate"
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage = serverAuth
+keyUsage = critical, digitalSignature, keyEncipherment
+
+[ client_cert ]
+basicConstraints = CA:FALSE
+nsCertType = client
+nsComment = "OpenVPN Client Certificate"
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer:always
+extendedKeyUsage = clientAuth
+keyUsage = critical, digitalSignature
