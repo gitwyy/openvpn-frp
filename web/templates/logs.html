@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}日志查看 - OpenVPN-FRP 管理面板{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-file-alt"></i> 服务日志</h5>
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-outline-dark btn-sm" onclick="loadLogs('all')">
+                            <i class="fas fa-layer-group"></i> 所有日志
+                        </button>
+                        <button type="button" class="btn btn-outline-dark btn-sm" onclick="loadLogs('openvpn')">
+                            <i class="fas fa-shield-alt"></i> OpenVPN
+                        </button>
+                        <button type="button" class="btn btn-outline-dark btn-sm" onclick="loadLogs('frpc')">
+                            <i class="fas fa-exchange-alt"></i> FRP Client
+                        </button>
+                        <button type="button" class="btn btn-outline-dark btn-sm" onclick="loadLogs('frps')">
+                            <i class="fas fa-server"></i> FRP Server
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <!-- 控制面板 -->
+                <div class="p-3 border-bottom bg-light">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <div class="input-group">
+                                <label class="input-group-text" for="log-lines">显示行数:</label>
+                                <select class="form-select" id="log-lines" onchange="loadLogs(currentService)">
+                                    <option value="50">50行</option>
+                                    <option value="100" selected>100行</option>
+                                    <option value="200">200行</option>
+                                    <option value="500">500行</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadLogs(currentService)">
+                                    <i class="fas fa-sync"></i> 刷新
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm" id="auto-refresh-btn" onclick="toggleAutoRefresh()">
+                                    <i class="fas fa-play"></i> 自动刷新
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearLogs()">
+                                    <i class="fas fa-eraser"></i> 清空
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 日志显示区域 -->
+                <div class="log-container" id="log-content">
+                    <div class="text-center text-muted p-4">
+                        <i class="fas fa-file-alt fa-3x mb-3"></i>
+                        <p>选择一个服务查看日志</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer bg-light">
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle"></i> 
+                        当前服务: <span id="current-service-name">无</span>
+                    </small>
+                    <small class="text-muted">
+                        最后更新: <span id="last-update">从未</span>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentService = 'all';
+let autoRefreshInterval = null;
+let isAutoRefreshing = false;
+
+// 页面加载完成后加载默认日志
+$(document).ready(function() {
+    loadLogs('all');
+});
+
+// 页面卸载时清除定时器
+$(window).on('beforeunload', function() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+    }
+});
+
+// 加载日志
+function loadLogs(service) {
+    currentService = service;
+    const lines = $('#log-lines').val();
+    
+    // 更新当前服务显示
+    const serviceNames = {
+        'all': '所有服务',
+        'openvpn': 'OpenVPN',
+        'frpc': 'FRP Client',
+        'frps': 'FRP Server'
+    };
+    $('#current-service-name').text(serviceNames[service] || service);
+    
+    // 显示加载状态
+    $('#log-content').html(`
+        <div class="text-center text-muted p-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <p class="mt-2">正在加载${serviceNames[service]}日志...</p>
+        </div>
+    `);
+    
+    $.ajax({
+        url: '/api/logs',
+        method: 'GET',
+        data: {
+            service: service,
+            lines: lines
+        },
+        success: function(data) {
+            if (data.success) {
+                displayLogs(data.logs);
+                updateLastUpdateTime();
+            } else {
+                showLogError('加载日志失败: ' + (data.error || '未知错误'));
+            }
+        },
+        error: function(xhr, status, error) {
+            showLogError('网络错误: ' + error);
+        }
+    });
+}
+
+// 显示日志内容
+function displayLogs(logs) {
+    if (!logs || logs.trim() === '') {
+        $('#log-content').html(`
+            <div class="text-center text-muted p-4">
+                <i class="fas fa-file fa-3x mb-3"></i>
+                <p>暂无日志内容</p>
+            </div>
+        `);
+        return;
+    }
+    
+    // 处理日志内容，添加颜色高亮
+    let processedLogs = logs
+        .replace(/\[ERROR\]|\bERROR\b|\bFAIL\b/gi, '<span class="text-danger">$&</span>')
+        .replace(/\[WARN\]|\bWARN\b|\bWARNING\b/gi, '<span class="text-warning">$&</span>')
+        .replace(/\[INFO\]|\bINFO\b/gi, '<span class="text-info">$&</span>')
+        .replace(/\[DEBUG\]|\bDEBUG\b/gi, '<span class="text-muted">$&</span>')
+        .replace(/\[SUCCESS\]|\bSUCCESS\b|\bOK\b/gi, '<span class="text-success">$&</span>');
+    
+    $('#log-content').html(`<pre>${processedLogs}</pre>`);
+    
+    // 自动滚动到底部
+    const logContainer = document.getElementById('log-content');
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+// 显示日志错误
+function showLogError(message) {
+    $('#log-content').html(`
+        <div class="text-center text-danger p-4">
+            <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+            <p>${message}</p>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadLogs(currentService)">
+                <i class="fas fa-redo"></i> 重试
+            </button>
+        </div>
+    `);
+}
+
+// 清空日志显示
+function clearLogs() {
+    $('#log-content').html(`
+        <div class="text-center text-muted p-4">
+            <i class="fas fa-file fa-3x mb-3"></i>
+            <p>日志已清空</p>
+        </div>
+    `);
+    $('#current-service-name').text('无');
+    $('#last-update').text('从未');
+}
+
+// 切换自动刷新
+function toggleAutoRefresh() {
+    if (isAutoRefreshing) {
+        // 停止自动刷新
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+        isAutoRefreshing = false;
+        
+        $('#auto-refresh-btn').html('<i class="fas fa-play"></i> 自动刷新')
+                              .removeClass('btn-outline-danger')
+                              .addClass('btn-outline-success');
+    } else {
+        // 开始自动刷新
+        autoRefreshInterval = setInterval(function() {
+            loadLogs(currentService);
+        }, 5000); // 每5秒刷新一次
+        
+        isAutoRefreshing = true;
+        
+        $('#auto-refresh-btn').html('<i class="fas fa-stop"></i> 停止刷新')
+                              .removeClass('btn-outline-success')
+                              .addClass('btn-outline-danger');
+    }
+}
+
+// 更新最后更新时间
+function updateLastUpdateTime() {
+    const now = new Date();
+    $('#last-update').text(now.toLocaleTimeString('zh-CN'));
+}
+
+// 键盘快捷键
+$(document).keydown(function(e) {
+    // Ctrl+R 或 F5 刷新日志
+    if ((e.ctrlKey && e.keyCode === 82) || e.keyCode === 116) {
+        e.preventDefault();
+        loadLogs(currentService);
+    }
+    
+    // Ctrl+L 清空日志
+    if (e.ctrlKey && e.keyCode === 76) {
+        e.preventDefault();
+        clearLogs();
+    }
+});
+</script>
+{% endblock %}

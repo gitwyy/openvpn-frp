@@ -1,0 +1,388 @@
+{% extends "base.html" %}
+
+{% block title %}客户端管理 - OpenVPN-FRP 管理面板{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 在线客户端列表 -->
+    <div class="col-md-8 mb-4">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-users"></i> 在线客户端</h5>
+                    <button type="button" class="btn btn-light btn-sm" onclick="loadClients()">
+                        <i class="fas fa-sync"></i> 刷新
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="clients-list">
+                    <div class="text-center">
+                        <div class="spinner-border text-success" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                        <p class="mt-2">正在获取客户端列表...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 客户端管理操作 -->
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-plus"></i> 生成客户端配置</h5>
+            </div>
+            <div class="card-body">
+                <form id="create-client-form">
+                    <div class="mb-3">
+                        <label for="client-name" class="form-label">客户端名称</label>
+                        <input type="text" class="form-control" id="client-name" 
+                               placeholder="例如: user1, mobile1" required>
+                        <div class="form-text">
+                            只能包含字母、数字、下划线和连字符
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">配置选项</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="android-config" checked>
+                            <label class="form-check-label" for="android-config">
+                                Android 优化配置
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="inline-config" checked>
+                            <label class="form-check-label" for="inline-config">
+                                内联证书格式
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> 生成配置
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 快速操作 -->
+        <div class="card mt-3">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-tools"></i> 快速操作</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="downloadSampleConfig()">
+                        <i class="fas fa-download"></i> 下载示例配置
+                    </button>
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="showCertificateInfo()">
+                        <i class="fas fa-certificate"></i> 证书信息
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showConnectionGuide()">
+                        <i class="fas fa-question-circle"></i> 连接指南
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 操作结果模态框 -->
+<div class="modal fade" id="resultModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resultModalTitle">操作结果</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="resultModalContent"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 页面加载完成后获取客户端列表
+$(document).ready(function() {
+    loadClients();
+    
+    // 绑定表单提交事件
+    $('#create-client-form').on('submit', function(e) {
+        e.preventDefault();
+        createClient();
+    });
+});
+
+// 加载客户端列表
+function loadClients() {
+    $.ajax({
+        url: '/api/clients',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                displayClients(data.clients, data.count);
+            } else {
+                showClientsError('获取客户端列表失败: ' + (data.error || '未知错误'));
+            }
+        },
+        error: function(xhr, status, error) {
+            showClientsError('网络错误: ' + error);
+        }
+    });
+}
+
+// 显示客户端列表
+function displayClients(clients, count) {
+    if (!clients || clients.length === 0) {
+        $('#clients-list').html(`
+            <div class="text-center text-muted">
+                <i class="fas fa-user-slash fa-3x mb-3"></i>
+                <p>当前没有在线客户端</p>
+                <small class="text-muted">客户端连接后将在此显示</small>
+            </div>
+        `);
+        return;
+    }
+    
+    let html = `
+        <div class="mb-3">
+            <span class="badge bg-success">${count} 个在线客户端</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th><i class="fas fa-user"></i> 客户端</th>
+                        <th><i class="fas fa-globe"></i> 真实IP</th>
+                        <th><i class="fas fa-network-wired"></i> 虚拟IP</th>
+                        <th><i class="fas fa-clock"></i> 连接时间</th>
+                        <th><i class="fas fa-exchange-alt"></i> 流量</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    clients.forEach(function(client) {
+        const bytesReceived = formatBytes(parseInt(client.bytes_received) || 0);
+        const bytesSent = formatBytes(parseInt(client.bytes_sent) || 0);
+        const connectedSince = client.connected_since !== 'Unknown' ? 
+                              new Date(client.connected_since * 1000).toLocaleString('zh-CN') : 
+                              '未知';
+        
+        html += `
+            <tr>
+                <td>
+                    <i class="fas fa-circle text-success" style="font-size: 8px;"></i>
+                    <strong>${client.name}</strong>
+                </td>
+                <td><code>${client.real_address}</code></td>
+                <td><code>${client.virtual_address}</code></td>
+                <td><small>${connectedSince}</small></td>
+                <td>
+                    <small>
+                        <i class="fas fa-arrow-down text-success"></i> ${bytesReceived}<br>
+                        <i class="fas fa-arrow-up text-primary"></i> ${bytesSent}
+                    </small>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    $('#clients-list').html(html);
+}
+
+// 显示客户端列表错误
+function showClientsError(message) {
+    $('#clients-list').html(`
+        <div class="text-center text-danger">
+            <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+            <p>${message}</p>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadClients()">
+                <i class="fas fa-redo"></i> 重试
+            </button>
+        </div>
+    `);
+}
+
+// 创建客户端配置
+function createClient() {
+    const clientName = $('#client-name').val().trim();
+    
+    if (!clientName) {
+        alert('请输入客户端名称');
+        return;
+    }
+    
+    // 验证客户端名称格式
+    if (!/^[a-zA-Z0-9_-]+$/.test(clientName)) {
+        alert('客户端名称只能包含字母、数字、下划线和连字符');
+        return;
+    }
+    
+    // 显示加载状态
+    const submitBtn = $('#create-client-form button[type="submit"]');
+    const originalText = submitBtn.html();
+    submitBtn.html('<i class="fas fa-spinner fa-spin"></i> 生成中...').prop('disabled', true);
+    
+    $.ajax({
+        url: '/api/client/create',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            name: clientName
+        }),
+        success: function(data) {
+            if (data.success) {
+                showResultModal('成功', `
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle"></i> 客户端配置生成成功！
+                    </div>
+                    <p><strong>客户端名称:</strong> ${clientName}</p>
+                    <p><strong>配置文件位置:</strong> <code>clients/${clientName}.ovpn</code></p>
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i> 
+                        配置文件已生成，请从服务器下载使用。
+                    </div>
+                `);
+                
+                // 清空表单
+                $('#client-name').val('');
+                
+                // 刷新客户端列表
+                setTimeout(loadClients, 2000);
+            } else {
+                showResultModal('错误', `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> 生成失败
+                    </div>
+                    <p><strong>错误信息:</strong></p>
+                    <pre class="bg-light p-2">${data.error}</pre>
+                `);
+            }
+        },
+        error: function(xhr, status, error) {
+            showResultModal('网络错误', `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> 网络请求失败
+                </div>
+                <p><strong>错误信息:</strong> ${error}</p>
+            `);
+        },
+        complete: function() {
+            // 恢复按钮状态
+            submitBtn.html(originalText).prop('disabled', false);
+        }
+    });
+}
+
+// 显示结果模态框
+function showResultModal(title, content) {
+    $('#resultModalTitle').text(title);
+    $('#resultModalContent').html(content);
+    $('#resultModal').modal('show');
+}
+
+// 格式化字节数
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 下载示例配置
+function downloadSampleConfig() {
+    showResultModal('示例配置', `
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle"></i> 
+            以下是OpenVPN客户端配置文件的基本结构
+        </div>
+        <pre class="bg-light p-3" style="font-size: 12px;">client
+dev tun
+proto udp
+remote YOUR_SERVER_IP 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca ca.crt
+cert client.crt
+key client.key
+tls-auth ta.key 1
+cipher AES-256-GCM
+auth SHA256
+verb 3</pre>
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle"></i> 
+            实际配置文件会包含完整的证书内容
+        </div>
+    `);
+}
+
+// 显示证书信息
+function showCertificateInfo() {
+    showResultModal('证书信息', `
+        <div class="alert alert-info">
+            <i class="fas fa-certificate"></i> 
+            证书管理信息
+        </div>
+        <p><strong>CA证书:</strong> 用于验证服务器和客户端身份</p>
+        <p><strong>服务器证书:</strong> 服务器端使用的证书</p>
+        <p><strong>客户端证书:</strong> 每个客户端的唯一证书</p>
+        <p><strong>TLS认证密钥:</strong> 额外的安全层保护</p>
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle"></i> 
+            请妥善保管证书文件，不要泄露给他人
+        </div>
+    `);
+}
+
+// 显示连接指南
+function showConnectionGuide() {
+    showResultModal('连接指南', `
+        <div class="alert alert-info">
+            <i class="fas fa-question-circle"></i> 
+            OpenVPN客户端连接指南
+        </div>
+        <h6><i class="fas fa-mobile-alt"></i> 移动设备 (Android/iOS)</h6>
+        <ol>
+            <li>下载OpenVPN Connect应用</li>
+            <li>导入.ovpn配置文件</li>
+            <li>点击连接按钮</li>
+        </ol>
+        
+        <h6><i class="fas fa-desktop"></i> 桌面设备 (Windows/macOS/Linux)</h6>
+        <ol>
+            <li>安装OpenVPN客户端</li>
+            <li>将配置文件放入config目录</li>
+            <li>启动OpenVPN服务</li>
+        </ol>
+        
+        <div class="alert alert-success">
+            <i class="fas fa-lightbulb"></i> 
+            <strong>提示:</strong> 连接成功后，您的网络流量将通过VPN服务器转发
+        </div>
+    `);
+}
+</script>
+{% endblock %}

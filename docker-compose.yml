@@ -122,6 +122,47 @@ services:
       - frp-full
 
   # =============================================================================
+  # Web管理界面服务
+  # =============================================================================
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    image: openvpn-frp/web:latest
+    container_name: openvpn-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:5000"
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./config:/app/config:ro
+      - ./pki:/app/pki:rw
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - web-data:/app/data
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - WEB_SECRET_KEY=${WEB_SECRET_KEY:-openvpn-frp-web-secret-2024}
+      - WEB_ADMIN_USER=${WEB_ADMIN_USER:-admin}
+      - WEB_ADMIN_PASSWORD=${WEB_ADMIN_PASSWORD:-admin123}
+    networks:
+      - openvpn-network
+      - frp-network
+    depends_on:
+      openvpn:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "openvpn-frp.service=web"
+      - "openvpn-frp.version=1.0"
+    profiles:
+      - web
+
+  # =============================================================================
   # 监控和管理服务 (可选)
   # =============================================================================
   monitor:
@@ -208,6 +249,12 @@ volumes:
     driver: local
     labels:
       - "openvpn-frp.volume=frpc-logs"
+
+  # Web管理界面相关卷
+  web-data:
+    driver: local
+    labels:
+      - "openvpn-frp.volume=web-data"
 
   # 监控相关卷
   monitor-data:

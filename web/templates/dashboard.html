@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}仪表板 - OpenVPN-FRP 管理面板{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 服务状态卡片 -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-server"></i> 服务状态</h5>
+            </div>
+            <div class="card-body">
+                <div id="service-status">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                        <p class="mt-2">正在获取服务状态...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统信息卡片 -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-info-circle"></i> 系统信息</h5>
+            </div>
+            <div class="card-body">
+                <div id="system-info">
+                    <div class="text-center">
+                        <div class="spinner-border text-info" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                        <p class="mt-2">正在获取系统信息...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 服务控制面板 -->
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-cogs"></i> 服务控制</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <h6><i class="fas fa-shield-alt"></i> OpenVPN 服务</h6>
+                        <div class="btn-group d-grid gap-2" role="group">
+                            <button type="button" class="btn btn-success btn-action" onclick="serviceAction('start', 'openvpn')">
+                                <i class="fas fa-play"></i> 启动
+                            </button>
+                            <button type="button" class="btn btn-warning btn-action" onclick="serviceAction('restart', 'openvpn')">
+                                <i class="fas fa-redo"></i> 重启
+                            </button>
+                            <button type="button" class="btn btn-danger btn-action" onclick="serviceAction('stop', 'openvpn')">
+                                <i class="fas fa-stop"></i> 停止
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4 mb-3">
+                        <h6><i class="fas fa-exchange-alt"></i> FRPC 服务</h6>
+                        <div class="btn-group d-grid gap-2" role="group">
+                            <button type="button" class="btn btn-success btn-action" onclick="serviceAction('start', 'frpc')">
+                                <i class="fas fa-play"></i> 启动
+                            </button>
+                            <button type="button" class="btn btn-warning btn-action" onclick="serviceAction('restart', 'frpc')">
+                                <i class="fas fa-redo"></i> 重启
+                            </button>
+                            <button type="button" class="btn btn-danger btn-action" onclick="serviceAction('stop', 'frpc')">
+                                <i class="fas fa-stop"></i> 停止
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4 mb-3">
+                        <h6><i class="fas fa-layer-group"></i> 所有服务</h6>
+                        <div class="btn-group d-grid gap-2" role="group">
+                            <button type="button" class="btn btn-success btn-action" onclick="serviceAction('start', 'all')">
+                                <i class="fas fa-play"></i> 全部启动
+                            </button>
+                            <button type="button" class="btn btn-warning btn-action" onclick="serviceAction('restart', 'all')">
+                                <i class="fas fa-redo"></i> 全部重启
+                            </button>
+                            <button type="button" class="btn btn-danger btn-action" onclick="serviceAction('stop', 'all')">
+                                <i class="fas fa-stop"></i> 全部停止
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 快速操作结果 -->
+<div id="action-result" class="d-none">
+    <div class="alert alert-info alert-dismissible fade show" role="alert">
+        <div id="action-message"></div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let statusUpdateInterval;
+
+// 页面加载完成后开始更新状态
+$(document).ready(function() {
+    updateStatus();
+    // 每30秒自动更新状态
+    statusUpdateInterval = setInterval(updateStatus, 30000);
+});
+
+// 页面卸载时清除定时器
+$(window).on('beforeunload', function() {
+    if (statusUpdateInterval) {
+        clearInterval(statusUpdateInterval);
+    }
+});
+
+// 更新服务状态
+function updateStatus() {
+    $.ajax({
+        url: '/api/status',
+        method: 'GET',
+        success: function(data) {
+            if (data.success) {
+                updateServiceStatus(data.containers);
+                updateSystemInfo(data.system);
+            } else {
+                showError('获取状态失败: ' + (data.error || '未知错误'));
+            }
+        },
+        error: function(xhr, status, error) {
+            showError('网络错误: ' + error);
+        }
+    });
+}
+
+// 更新服务状态显示
+function updateServiceStatus(containers) {
+    let html = '';
+    
+    // OpenVPN 状态
+    const openvpn = containers['openvpn'] || {};
+    const openvpnRunning = openvpn.status && openvpn.status.includes('Up');
+    
+    html += `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span><i class="fas fa-shield-alt"></i> OpenVPN</span>
+            <span>
+                <span class="status-indicator ${openvpnRunning ? 'status-running' : 'status-stopped'}"></span>
+                ${openvpnRunning ? '运行中' : '已停止'}
+            </span>
+        </div>
+    `;
+    
+    // FRP 状态
+    const frpc = containers['frpc'] || {};
+    const frpcRunning = frpc.status && frpc.status.includes('Up');
+    
+    html += `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span><i class="fas fa-exchange-alt"></i> FRP Client</span>
+            <span>
+                <span class="status-indicator ${frpcRunning ? 'status-running' : 'status-stopped'}"></span>
+                ${frpcRunning ? '运行中' : '已停止'}
+            </span>
+        </div>
+    `;
+    
+    // FRP Server (如果存在)
+    const frps = containers['frps'] || {};
+    if (Object.keys(frps).length > 0) {
+        const frpsRunning = frps.status && frps.status.includes('Up');
+        html += `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <span><i class="fas fa-server"></i> FRP Server</span>
+                <span>
+                    <span class="status-indicator ${frpsRunning ? 'status-running' : 'status-stopped'}"></span>
+                    ${frpsRunning ? '运行中' : '已停止'}
+                </span>
+            </div>
+        `;
+    }
+    
+    $('#service-status').html(html);
+}
+
+// 更新系统信息显示
+function updateSystemInfo(system) {
+    const html = `
+        <div class="mb-2">
+            <strong><i class="fas fa-clock"></i> 系统时间:</strong><br>
+            <span class="text-muted">${system.timestamp}</span>
+        </div>
+        <div class="mb-2">
+            <strong><i class="fas fa-server"></i> 系统运行时间:</strong><br>
+            <span class="text-muted">${system.uptime}</span>
+        </div>
+        <div class="mb-2">
+            <strong><i class="fas fa-sync"></i> 最后更新:</strong><br>
+            <span class="text-muted">刚刚</span>
+        </div>
+    `;
+    
+    $('#system-info').html(html);
+}
+
+// 执行服务操作
+function serviceAction(action, service) {
+    const actionText = {
+        'start': '启动',
+        'stop': '停止',
+        'restart': '重启'
+    };
+    
+    const serviceText = {
+        'openvpn': 'OpenVPN',
+        'frpc': 'FRP Client',
+        'frps': 'FRP Server',
+        'all': '所有服务'
+    };
+    
+    if (!confirm(`确定要${actionText[action]}${serviceText[service]}吗？`)) {
+        return;
+    }
+    
+    // 显示加载状态
+    showActionResult('info', `正在${actionText[action]}${serviceText[service]}...`);
+    
+    $.ajax({
+        url: '/api/service/action',
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            action: action,
+            service: service
+        }),
+        success: function(data) {
+            if (data.success) {
+                showActionResult('success', `${serviceText[service]}${actionText[action]}成功`);
+                // 延迟更新状态，给服务时间启动
+                setTimeout(updateStatus, 2000);
+            } else {
+                showActionResult('danger', `${serviceText[service]}${actionText[action]}失败: ${data.error}`);
+            }
+        },
+        error: function(xhr, status, error) {
+            showActionResult('danger', `操作失败: ${error}`);
+        }
+    });
+}
+
+// 显示操作结果
+function showActionResult(type, message) {
+    const alertClass = type === 'danger' ? 'alert-danger' : 
+                      type === 'success' ? 'alert-success' : 
+                      type === 'warning' ? 'alert-warning' : 'alert-info';
+    
+    $('#action-result').removeClass('d-none');
+    $('#action-result .alert').removeClass('alert-info alert-success alert-warning alert-danger').addClass(alertClass);
+    $('#action-message').html(message);
+}
+
+// 显示错误信息
+function showError(message) {
+    $('#service-status').html(`
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-triangle"></i> ${message}
+        </div>
+    `);
+    
+    $('#system-info').html(`
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-triangle"></i> 无法获取系统信息
+        </div>
+    `);
+}
+</script>
+{% endblock %}
